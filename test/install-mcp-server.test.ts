@@ -1,6 +1,7 @@
 import { describe, test, expect, beforeEach, afterEach, spyOn } from "bun:test";
 import { prepareMcpConfig } from "../src/mcp/install-mcp-server";
 import * as core from "@actions/core";
+import * as child_process from "child_process";
 import type { ParsedGitHubContext } from "../src/github/context";
 import { CLAUDE_APP_BOT_ID, CLAUDE_BOT_LOGIN } from "../src/github/constants";
 
@@ -10,6 +11,7 @@ describe("prepareMcpConfig", () => {
   let setFailedSpy: any;
   let processExitSpy: any;
   let fetchSpy: any;
+  let execSyncSpy: any;
 
   // Create a mock context for tests
   const mockContext: ParsedGitHubContext = {
@@ -73,6 +75,11 @@ describe("prepareMcpConfig", () => {
       new Response(JSON.stringify({ workflow_runs: [] }), { status: 200 }),
     );
 
+    // Mock execSync so isCommandAvailable("docker") returns true by default
+    execSyncSpy = spyOn(child_process, "execSync").mockReturnValue(
+      Buffer.from("/usr/bin/docker\n"),
+    );
+
     // Set up required environment variables
     if (!process.env.GITHUB_ACTION_PATH) {
       process.env.GITHUB_ACTION_PATH = "/test/action/path";
@@ -85,6 +92,7 @@ describe("prepareMcpConfig", () => {
     setFailedSpy.mockRestore();
     processExitSpy.mockRestore();
     fetchSpy.mockRestore();
+    execSyncSpy.mockRestore();
   });
 
   test("should return comment server when commit signing is disabled", async () => {
@@ -313,5 +321,34 @@ describe("prepareMcpConfig", () => {
 
     const parsed = JSON.parse(result);
     expect(parsed.mcpServers.github_ci).not.toBeDefined();
+  });
+
+  test("should use npx fallback for github MCP server when docker is unavailable", async () => {
+    // Make isCommandAvailable("docker") return false
+    execSyncSpy.mockImplementation(() => {
+      throw new Error("command not found");
+    });
+
+    const result = await prepareMcpConfig({
+      githubToken: "test-token",
+      owner: "test-owner",
+      repo: "test-repo",
+      branch: "test-branch",
+      baseBranch: "main",
+      allowedTools: ["mcp__github__create_issue"],
+      mode: "tag",
+      context: mockContext,
+    });
+
+    const parsed = JSON.parse(result);
+    expect(parsed.mcpServers.github).toBeDefined();
+    expect(parsed.mcpServers.github.command).toBe("npx");
+    expect(parsed.mcpServers.github.args).toEqual([
+      "-y",
+      "@modelcontextprotocol/server-github",
+    ]);
+    expect(parsed.mcpServers.github.env.GITHUB_PERSONAL_ACCESS_TOKEN).toBe(
+      "test-token",
+    );
   });
 });
