@@ -81,13 +81,28 @@ async function installClaudeCode(): Promise<void> {
         child.on("error", reject);
       });
       console.log("Claude Code installed successfully");
-      // Add to PATH
+      // Add install directory to PATH
       const homeBin = `${process.env.HOME}/.local/bin`;
+      const installDir = existsSync(`${homeBin}/claude`) ? homeBin : null;
+      // If not found at expected path, search for it
+      const effectiveDir =
+        installDir ??
+        (() => {
+          try {
+            const found = require("child_process")
+              .execSync("bash -lc 'command -v claude'", { stdio: "pipe" })
+              .toString()
+              .trim();
+            return found ? dirname(found) : homeBin;
+          } catch {
+            return homeBin;
+          }
+        })();
       const githubPath = process.env.GITHUB_PATH;
       if (githubPath) {
-        await appendFile(githubPath, `${homeBin}\n`);
+        await appendFile(githubPath, `${effectiveDir}\n`);
       }
-      process.env.PATH = `${homeBin}:${process.env.PATH}`;
+      process.env.PATH = `${effectiveDir}:${process.env.PATH}`;
       return;
     } catch (error) {
       if (attempt === 3) {

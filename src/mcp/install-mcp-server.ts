@@ -1,9 +1,19 @@
 import * as core from "@actions/core";
+import { execSync } from "child_process";
 import { GITHUB_API_URL, GITHUB_SERVER_URL } from "../github/api/config";
 import type { GitHubContext } from "../github/context";
 import { isEntityContext } from "../github/context";
 import { Octokit } from "@octokit/rest";
 import type { AutoDetectedMode } from "../modes/detector";
+
+function isCommandAvailable(cmd: string): boolean {
+  try {
+    execSync(`command -v ${cmd}`, { stdio: "pipe" });
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 type PrepareConfigParams = {
   githubToken: string;
@@ -204,23 +214,35 @@ export async function prepareMcpConfig(
     }
 
     if (hasGitHubMcpTools) {
-      baseMcpConfig.mcpServers.github = {
-        command: "docker",
-        args: [
-          "run",
-          "-i",
-          "--rm",
-          "-e",
-          "GITHUB_PERSONAL_ACCESS_TOKEN",
-          "-e",
-          "GITHUB_HOST",
-          "ghcr.io/github/github-mcp-server:sha-23fa0dd", // https://github.com/github/github-mcp-server/releases/tag/v0.17.1
-        ],
-        env: {
-          GITHUB_PERSONAL_ACCESS_TOKEN: githubToken,
-          GITHUB_HOST: GITHUB_SERVER_URL,
-        },
-      };
+      if (isCommandAvailable("docker")) {
+        baseMcpConfig.mcpServers.github = {
+          command: "docker",
+          args: [
+            "run",
+            "-i",
+            "--rm",
+            "-e",
+            "GITHUB_PERSONAL_ACCESS_TOKEN",
+            "-e",
+            "GITHUB_HOST",
+            "ghcr.io/github/github-mcp-server:sha-23fa0dd", // https://github.com/github/github-mcp-server/releases/tag/v0.17.1
+          ],
+          env: {
+            GITHUB_PERSONAL_ACCESS_TOKEN: githubToken,
+            GITHUB_HOST: GITHUB_SERVER_URL,
+          },
+        };
+      } else {
+        core.info("Docker not available — using npx for GitHub MCP server");
+        baseMcpConfig.mcpServers.github = {
+          command: "npx",
+          args: ["-y", "@modelcontextprotocol/server-github"],
+          env: {
+            GITHUB_PERSONAL_ACCESS_TOKEN: githubToken,
+            GITHUB_HOST: GITHUB_SERVER_URL,
+          },
+        };
+      }
     }
 
     // Return only our GitHub servers config
